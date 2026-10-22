@@ -770,14 +770,18 @@ void SubmitSignal(const int direction,const double anchor,
 
 void ManageOurPositions()
   {
-   if(!InpUseBreakeven && !InpUseTrailing) return;
+   if(InpExecutionMode!=GT_AUTO_TRADE ||
+      (!InpUseBreakeven && InpTrailMode==GT_TRAIL_OFF))
+      return;
    double atr=0.0;
-   if(!IndicatorValue(g_atrHandle,1,atr) || atr<=0.0) return;
+   if(InpTrailMode==GT_TRAIL_ATR &&
+      (!IndicatorValue(g_atrHandle,1,atr) || atr<=0.0))
+      return;
    MqlTick tick;
    if(!SymbolInfoTick(_Symbol,tick)) return;
    int stops=(int)SymbolInfoInteger(_Symbol,SYMBOL_TRADE_STOPS_LEVEL);
    int freeze=(int)SymbolInfoInteger(_Symbol,SYMBOL_TRADE_FREEZE_LEVEL);
-   double minDistance=(MathMax(stops,freeze)+2)*_Point;
+   double minimum=(MathMax(stops,freeze)+2)*_Point;
 
    for(int i=PositionsTotal()-1;i>=0;i--)
      {
@@ -785,41 +789,49 @@ void ManageOurPositions()
       if(ticket==0 || !PositionSelectByTicket(ticket)) continue;
       if(PositionGetString(POSITION_SYMBOL)!=_Symbol ||
          PositionGetInteger(POSITION_MAGIC)!=InpMagic) continue;
-
-      long type=PositionGetInteger(POSITION_TYPE);
-      int direction=(type==POSITION_TYPE_BUY?1:-1);
+      int direction=(PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY?1:-1);
       double entry=PositionGetDouble(POSITION_PRICE_OPEN);
       double oldSL=PositionGetDouble(POSITION_SL);
-      double tp=PositionGetDouble(POSITION_TP);
-      if(tp<=0.0 || InpRiskReward<=0) continue;
-      double initialR=MathAbs(tp-entry)/InpRiskReward;
+      double target=PositionGetDouble(POSITION_TP);
       double market=(direction==1?tick.bid:tick.ask);
-      double move=(market-entry)*direction;
+      double gain=(market-entry)*direction;
       double proposedSL=oldSL;
+      double unit=TradePoint();
 
-      if(InpUseBreakeven && move>=initialR*InpBreakevenAtR)
+      if(InpUseBreakeven && gain>=InpBEStartPoints*unit)
         {
-         double be=entry+direction*InpBreakevenPlusPoints*_Point;
-         if(direction==1 && (oldSL==0 || be>proposedSL)) proposedSL=be;
-         if(direction==-1 && (oldSL==0 || be<proposedSL)) proposedSL=be;
+         double breakeven=entry+direction*InpBEPlusPoints*unit;
+         if(direction==1 && (proposedSL==0.0 || breakeven>proposedSL))
+            proposedSL=breakeven;
+         if(direction==-1 && (proposedSL==0.0 || breakeven<proposedSL))
+            proposedSL=breakeven;
         }
-      if(InpUseTrailing && move>=initialR*InpTrailAfterR)
+      if(InpTrailMode!=GT_TRAIL_OFF && gain>=InpTrailStartPoints*unit)
         {
-         double trailed=market-direction*atr*InpTrailATR;
-         if(direction==1 && (oldSL==0 || trailed>proposedSL)) proposedSL=trailed;
-         if(direction==-1 && (oldSL==0 || trailed<proposedSL)) proposedSL=trailed;
+         double gap=(InpTrailMode==GT_TRAIL_POINTS?
+                     InpTrailDistancePoints*unit : atr*InpTrailATR);
+         double candidate=market-direction*gap;
+         if(direction==1 && (proposedSL==0.0 || candidate>proposedSL))
+            proposedSL=candidate;
+         if(direction==-1 && (proposedSL==0.0 || candidate<proposedSL))
+            proposedSL=candidate;
         }
-      bool improves=(direction==1?proposedSL>oldSL+_Point:
-                       oldSL==0 || proposedSL<oldSL-_Point);
-      bool validDistance=(direction==1?
-                          market-proposedSL>minDistance:
-                          proposedSL-market>minDistance);
-      if(improves && validDistance && proposedSL>0)
+      // Do not push BE using the full trailing step if trailing has not started.
+      double step=_Point;
+      if(InpTrailMode!=GT_TRAIL_OFF && gain>=InpTrailStartPoints*unit)
+         step=MathMax(_Point,InpTrailStepPoints*unit);
+      bool improvement=(direction==1?
+                         (oldSL==0.0 || proposedSL>=oldSL+step):
+                         (oldSL==0.0 || proposedSL<=oldSL-step));
+      bool valid=(direction==1?
+                  market-proposedSL>minimum:
+                  proposedSL-market>minimum);
+      if(improvement && valid && proposedSL>0.0)
         {
-         double rounded=NormalizeDouble(proposedSL,_Digits);
-         if(!trade.PositionModify(ticket,rounded,tp) ||
+         double newSL=NormalizeDouble(proposedSL,_Digits);
+         if(!trade.PositionModify(ticket,newSL,target) ||
             trade.ResultRetcode()!=TRADE_RETCODE_DONE)
-            PrintFormat("GTProStyle stop modify failed %I64u: %s",
+            PrintFormat("GTProThai modify SL failed %I64u: %s",
                         ticket,trade.ResultRetcodeDescription());
         }
      }
@@ -833,11 +845,14 @@ void ProcessClosedBar()
    ArraySetAsSeries(r,true);
    int received=CopyRates(_Symbol,InpEntryTF,0,barsNeeded,r);
    if(received<InpPivotLeft+InpPivotRight+InpInternalBreakBars+12)
-     { g_status="Waiting for M5 history"; return; }
+     { g_status="รอข้อมูลแท่งเทียน"; return; }
    double atr=0.0,adx=0.0;
    if(!IndicatorValue(g_atrHandle,1,atr) || atr<=0.0)
-     { g_status="Waiting for ATR"; return; }
+     { g_status="รอข้อมูล ATR"; return; }
    int trend=GetTrendDirection(adx);
+   g_lastTrend=trend;
+   g_lastADX=adx;
+   RefreshZones(r,received,atr);
    if(g_cooldown>0) g_cooldown--;
 
    double trendAnchor=0.0,reversalAnchor=0.0;
@@ -852,8 +867,8 @@ void ProcessClosedBar()
    else if(reversalSignal!=0)
       SubmitSignal(reversalSignal,reversalAnchor,atr,"SWEEP_CHOCH",r[1].time);
    else
-      g_status="Watching | M15 trend="+IntegerToString(trend)+
-               " ADX="+DoubleToString(adx,1);
+      g_status="รอจังหวะเข้า: "+ThaiTrend(trend)+
+               " | ADX="+DoubleToString(adx,1);
   }
 
 int OnInit()
