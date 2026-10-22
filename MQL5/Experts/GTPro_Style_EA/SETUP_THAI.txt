@@ -1,0 +1,58 @@
+GTPro Style EA V2 — คู่มือภาษาไทย (MetaTrader 5)
+=================================================
+ไฟล์ EA: GTPro_Thai_Dashboard_EA.mq5
+โฟลเดอร์ใน GitHub: MQL5/Experts/GTPro_Style_EA/
+
+วิธีนำเข้าเครื่อง Windows
+1. เปิด GitHub โปรเจกต์ GTPRO และไฟล์ GTPro_Thai_Dashboard_EA.mq5
+2. กด Raw หรือ Download raw file เพื่อดาวน์โหลดไฟล์ .mq5
+3. เปิด MT5 > File > Open Data Folder > MQL5 > Experts
+4. สร้างโฟลเดอร์ GTPro_Style_EA แล้ววางไฟล์ .mq5 ลงไป
+5. กด F4 เปิด MetaEditor, เปิดไฟล์นี้แล้วกด F7 เพื่อ Compile
+6. ตรวจว่ามี .ex5 ในโฟลเดอร์เดียวกันและมี 0 errors
+7. กลับ MT5 > Navigator > Expert Advisors > Refresh
+8. กด Ctrl+R เข้า Strategy Tester และเลือกชื่อ GTPro_Thai_Dashboard_EA
+
+โหมดทำงาน:
+InpExecutionMode = GT_SIGNAL_ONLY  = วาดสัญญาณ/จุดเข้า/SL/TP ไม่เปิดออเดอร์ (ค่าเริ่มต้น)
+InpExecutionMode = GT_AUTO_TRADE  = ออกออเดอร์อัตโนมัติ หาก MT5 อนุญาตและผ่าน Risk Filters
+* เปลี่ยนโหมดผ่าน EA Inputs ไม่มีปุ่มสลับเทรดด้วยการกดบนกราฟ
+
+การคำนวณ 'จุด' XAUUSD:
+InpPricePerPoint = 0.01   => 100 จุด เท่ากับราคาทองขยับ 1.00 USD
+InpPricePerPoint = 0      => ใช้ _Point ของโบรกเกอร์
+ตัวกรอง InpMaxSpreadPoints และ InpDeviationPoints ใช้ broker points เสมอ
+
+TP / SL
+InpSLMode: GT_SL_SWING_ATR (อิง Swing+ATR) หรือ GT_SL_FIXED_POINTS (จุดคงที่)
+InpFixedSLPoints: 1500 จุด (= ระยะราคา $15 หาก InpPricePerPoint=0.01)
+InpTPMode: GT_TP_RR (เช่น 1.8R) หรือ GT_TP_FIXED_POINTS
+InpFixedTPPoints: 3000 จุด (= ระยะราคา $30 หาก InpPricePerPoint=0.01)
+InpUseBreakeven: เปิด/ปิดกันหน้าทุน
+InpBEStartPoints: เริ่มกันหน้าทุนเมื่อกำไรถึงกี่จุด
+InpBEPlusPoints: SL ล็อกกำไรเพิ่มเหนือ/ใต้ราคาเข้า
+InpTrailMode: GT_TRAIL_OFF / GT_TRAIL_POINTS / GT_TRAIL_ATR
+InpTrailStartPoints: กำไรถึงกี่จุดจึงเริ่มขยับ SL
+InpTrailDistancePoints: ระยะห่างของ SL จากราคาในโหมดจุด
+InpTrailStepPoints: ระยะขั้นตอนขั้นต่ำที่ต้องปรับ SL
+
+Supply / Demand:
+เป็นโซนสมมติจากแท่งราคาฐานก่อน Displacement + BOS ที่ยืนยันแล้ว
+แสดงล่าสุดอย่างละโซน และลบเมื่อหมดอายุหรือราคาปิดทะลุขอบ
+โซนไม่ได้ใช้เงื่อนไขต้นฉบับของ GTpro ที่เป็นข้อมูลปิด
+InpRequireZoneForReversal = false: ไม่บังคับให้ Sweep ต้องเกิดในโซน
+InpRequireZoneForReversal = true: ต้อง Sweep ใน Demand สำหรับ Buy / Supply สำหรับ Sell
+โซนที่เห็นขึ้นกับชุดข้อมูลย้อนหลังและกราฟปัจจุบัน (ไม่ใช่การย้อนวาดทั้งประวัติ)
+
+แดชบอร์ด:
+แสดงโหมด, กลยุทธ์, เทรนด์/ADX, Demand/Supply, สัญญาณล่าสุด,
+จุดเข้า, SL/TP, รูปแบบ Breakeven/Trailing และสถานะ Equity Lock
+แสดงบนกราฟหลัก; หากแสดงภาษาไทยไม่ถูกให้ตรวจฟอนต์ Tahoma/การเข้ารหัส
+
+ข้อควรระวัง:
+- เป็น EA ที่ออกแบบใหม่จากภาพ GTpro ไม่ใช่ source code หรือสูตรลับ GTpro
+- ไม่ได้ผ่านการ Compile/Backtest บนเครื่อง MT5 ของคุณโดยผู้ช่วย
+- ระบบหยุดเปิดออเดอร์ใหม่เมื่อชนข้อจำกัด DD แต่ไม่ได้สั่งปิดออเดอร์เดิม
+- ค่า Equity สูงสุดจะเริ่มนับใหม่เมื่อ EA ถูกเริ่มใหม่
+- ก่อนเทรดจริง ให้ทดสอบ Demo / Real Ticks / Forward test รวม Spread และ Commission
+- V2 ยังไม่มี Session Boxes, ตาราง Multi-TF เต็มรูปแบบ หรือปุ่ม Buy/Sell แบบ Semi-Auto
