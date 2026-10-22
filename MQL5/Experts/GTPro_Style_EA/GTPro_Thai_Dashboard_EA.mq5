@@ -877,7 +877,12 @@ int OnInit()
       InpInternalBreakBars<2 || InpFastEMA<2 || InpSlowEMA<=InpFastEMA ||
       InpATRPeriod<2 || InpRiskReward<=0 || InpRiskPercent<=0 ||
       InpMaxLot<=0 || InpMinStopATR<=0 ||
-      InpMaxStopATR<InpMinStopATR)
+      InpMaxStopATR<InpMinStopATR || InpFixedSLPoints<=0 ||
+      InpFixedTPPoints<=0 || InpZoneBaseLookback<2 ||
+      InpZoneMaxAgeBars<1 || InpZoneExtendBars<5 ||
+      InpBEStartPoints<0 || InpTrailStartPoints<0 ||
+      InpTrailDistancePoints<=0 || InpTrailStepPoints<1 ||
+      InpPricePerPoint<0.0)
      {
       Print("GTProStyle: invalid inputs");
       return INIT_PARAMETERS_INCORRECT;
@@ -897,18 +902,23 @@ int OnInit()
      }
    g_fvg.active=false;
    g_sweep.active=false;
+   g_demand.active=false;
+   g_supply.active=false;
    g_lastBar=iTime(_Symbol,InpEntryTF,0);
    g_day=0;
    g_peakEquity=AccountInfoDouble(ACCOUNT_EQUITY);
    UpdateEquityGuards();
-   g_status="Initialized";
-   Print("GTProStyle V1 initialized on ",_Symbol,". AutoTrade=",
-         (InpEnableAutoTrading?"ON":"OFF"));
+   g_status="พร้อมใช้งาน: "+ThaiMode();
+   EventSetTimer(2);
+   RenderDashboard();
+   Print("GTPro Thai EA V2 initialized: ",_Symbol," | ",ThaiMode());
    return INIT_SUCCEEDED;
   }
 
 void OnDeinit(const int reason)
   {
+   EventKillTimer();
+   ObjectsDeleteAll(0,g_panelPrefix);
    Comment("");
    if(g_fastHandle!=INVALID_HANDLE) IndicatorRelease(g_fastHandle);
    if(g_slowHandle!=INVALID_HANDLE) IndicatorRelease(g_slowHandle);
@@ -920,17 +930,18 @@ void OnTick()
   {
    UpdateEquityGuards();
    ManageOurPositions();
-   datetime bar=iTime(_Symbol,InpEntryTF,0);
-   if(bar!=0 && bar!=g_lastBar)
+   datetime currentBar=iTime(_Symbol,InpEntryTF,0);
+   if(currentBar!=0 && currentBar!=g_lastBar)
      {
-      g_lastBar=bar;
+      g_lastBar=currentBar;
       ProcessClosedBar();
+      RenderDashboard();
      }
-   Comment("GTPro Style EA v1 | ",_Symbol,
-           "\nMode: ",EnumToString(InpStrategy),
-           "\nAuto Trading: ",(InpEnableAutoTrading?"ON":"OFF"),
-           "\nDaily lock: ",(g_dailyBlocked?"YES":"NO"),
-           " | Peak DD lock: ",(g_equityBlocked?"YES":"NO"),
-           "\n",g_status);
+  }
+
+void OnTimer()
+  {
+   UpdateEquityGuards();
+   RenderDashboard();
   }
 //+------------------------------------------------------------------+
