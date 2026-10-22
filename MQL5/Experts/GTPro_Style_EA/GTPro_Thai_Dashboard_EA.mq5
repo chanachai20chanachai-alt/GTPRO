@@ -25,7 +25,8 @@ input ENUM_TIMEFRAMES InpEntryTF = PERIOD_M5; // กราฟเข้าไม�
 input ENUM_TIMEFRAMES InpTrendTF = PERIOD_M15; // กราฟดูเทรนด์
 input long InpMagic = 26102302; // Magic Number
 input int InpDeviationPoints = 30; // สลิปเพจ สูงสุด (จุด)
-input int InpMaxSpreadPoints = 40; // สเปรด สูงสุด (จุด)
+input int InpMaxSpreadPoints = 40; // สเปรด สูงสุด (broker points)
+input double InpPricePerPoint = 0.01; // ทอง 100 จุด = ราคา $1; 0 = _Point โบรกเกอร์
 
 input group "02 | EMA / BOS / โครงสร้าง"
 input int InpFastEMA = 100; // EMA เร็ว
@@ -149,6 +150,8 @@ bool       g_dailyBlocked=false;
 bool       g_equityBlocked=false;
 string     g_status="Initializing";
 
+
+double TradePoint() { return (InpPricePerPoint>0.0 ? InpPricePerPoint : _Point); }
 
 string ThaiTrend(const int trend)
   {
@@ -295,7 +298,7 @@ void RenderDashboard()
    lines[10]="ป้องกันพอร์ต: "+lock+" | Spread: "+
              IntegerToString((int)SymbolInfoInteger(_Symbol,SYMBOL_SPREAD))+" จุด";
    lines[11]="สถานะ: "+g_status;
-   lines[12]="จุด = _Point ของโบรกเกอร์ | ทดลอง Demo ก่อนใช้จริง";
+   lines[12]="1 จุด = "+DoubleToString(TradePoint(),_Digits)+" ราคา | Demo ก่อนใช้งาน";
    for(int k=0;k<13;k++)
      {
       color ink=clrWhiteSmoke;
@@ -426,10 +429,10 @@ void RefreshZones(const MqlRates &r[],const int n,const double atr)
    if(FindPivots(r,n,InpPivotRight+1,sh,sl) &&
       MathAbs(r[1].close-r[1].open)>=atr*InpZoneDisplacementATR)
      {
-      bool bull=(r[1].close>sh+InpBreakBufferPoints*_Point &&
-                 r[2].close<=sh+InpBreakBufferPoints*_Point);
-      bool bear=(r[1].close<sl-InpBreakBufferPoints*_Point &&
-                 r[2].close>=sl-InpBreakBufferPoints*_Point);
+      bool bull=(r[1].close>sh+InpBreakBufferPoints*TradePoint() &&
+                 r[2].close<=sh+InpBreakBufferPoints*TradePoint());
+      bool bear=(r[1].close<sl-InpBreakBufferPoints*TradePoint() &&
+                 r[2].close>=sl-InpBreakBufferPoints*TradePoint());
       int look=MathMin(InpZoneBaseLookback+1,n-2);
       for(int j=2;j<=look;j++)
         {
@@ -530,7 +533,7 @@ int ProcessTrend(const MqlRates &r[],const int n,const int trend,
 
    double high,low;
    if(!FindPivots(r,n,InpPivotRight+1,high,low)) return 0;
-   double threshold=InpBreakBufferPoints*_Point;
+   double threshold=InpBreakBufferPoints*TradePoint();
    bool bullBOS=(trend==1 && r[1].close>high+threshold &&
                  r[2].close<=high+threshold);
    bool bearBOS=(trend==-1 && r[1].close<low-threshold &&
@@ -597,7 +600,7 @@ int ProcessReversal(const MqlRates &r[],const int n,const int trend,
    // Start farther back: the pivot must already have been confirmable
    // at the time of the sweep bar.
    if(!FindPivots(r,n,InpPivotRight+2,high,low)) return 0;
-   double buffer=InpSweepBufferPoints*_Point;
+   double buffer=InpSweepBufferPoints*TradePoint();
    int direction=0;
    if(r[1].low<low-buffer && r[1].close>low)
       direction=1;           // Sell-side liquidity sweep
@@ -673,51 +676,96 @@ void DrawTradeArrow(const int direction,const datetime stamp,
 void SubmitSignal(const int direction,const double anchor,
                   const double atr,const string origin,const datetime signalTime)
   {
-   g_status=origin+" signal "+(direction==1?"BUY":"SELL");
-   Print("GTProStyle ",g_status);
-   DrawTradeArrow(direction,signalTime,anchor);
-   if(!AllowedToOpen()) return;
-
    MqlTick tick;
-   if(!SymbolInfoTick(_Symbol,tick)) return;
+   if(!SymbolInfoTick(_Symbol,tick) || atr<=0.0) return;
    double entry=(direction==1?tick.ask:tick.bid);
-   double buffer=atr*InpStopBufferATR;
-   double rawStop=(direction==1?anchor-buffer:anchor+buffer);
-   double distance=(direction==1?entry-rawStop:rawStop-entry);
+   double unit=TradePoint();
+   double distance=0.0;
+   if(InpSLMode==GT_SL_FIXED_POINTS)
+      distance=InpFixedSLPoints*unit;
+   else
+     {
+      double swingSL=(direction==1?
+                      anchor-atr*InpStopBufferATR :
+                      anchor+atr*InpStopBufferATR);
+      distance=(direction==1 ? entry-swingSL : swingSL-entry);
+      distance=MathMax(distance,atr*InpMinStopATR);
+      if(distance>atr*InpMaxStopATR)
+        {
+         g_status="งดสัญญาณ: SL สูงเกิน ATR สูงสุด";
+         return;
+        }
+     }
    int stops=(int)SymbolInfoInteger(_Symbol,SYMBOL_TRADE_STOPS_LEVEL);
-   double minimum=MathMax(atr*InpMinStopATR,(stops+2)*_Point);
-   distance=MathMax(distance,minimum);
-   if(distance<=0 || distance>atr*InpMaxStopATR)
-     { g_status="Stop outside ATR limits"; return; }
-
+   double minDistance=(stops+2)*_Point+(tick.ask-tick.bid);
+   if(distance<=minDistance)
+     {
+      g_status="งดสัญญาณ: SL แคบกว่าขั้นต่ำโบรกเกอร์";
+      return;
+     }
+   double targetDistance=(InpTPMode==GT_TP_FIXED_POINTS?
+                          InpFixedTPPoints*unit : distance*InpRiskReward);
+   if(targetDistance<=minDistance)
+     {
+      g_status="งดสัญญาณ: TP แคบกว่าขั้นต่ำโบรกเกอร์";
+      return;
+     }
    double stop=NormalizeDouble(entry-direction*distance,_Digits);
-   double target=NormalizeDouble(entry+direction*distance*InpRiskReward,_Digits);
+   double target=NormalizeDouble(entry+direction*targetDistance,_Digits);
+   g_lastDirection=direction;
+   g_lastEntry=entry;
+   g_lastSL=stop;
+   g_lastTP=target;
+   g_lastSignalTime=signalTime;
+   g_lastSignalOrigin=origin;
+   g_status=(direction==1?"สัญญาณ BUY":"สัญญาณ SELL")+" "+origin;
+   DrawTradeArrow(direction,signalTime,entry);
+   DrawHorizontal("ENTRY",entry,clrGold,STYLE_DASH);
+   DrawHorizontal("STOP",stop,clrTomato,STYLE_DOT);
+   DrawHorizontal("TARGET",target,clrLime,STYLE_DOT);
+   PrintFormat("GTProThai %s %s entry=%s SL=%s TP=%s",
+               (direction==1?"BUY":"SELL"),origin,
+               PriceText(entry),PriceText(stop),PriceText(target));
+   if(InpPopupAlert && !MQLInfoInteger(MQL_TESTER))
+      Alert(_Symbol," ",g_status," @",PriceText(entry));
+   if(InpPushNotification && !MQLInfoInteger(MQL_TESTER))
+      SendNotification(_Symbol+" "+g_status+" @"+PriceText(entry));
+
+   if(InpExecutionMode==GT_SIGNAL_ONLY)
+     {
+      g_status="แจ้งสัญญาณ (ไม่ได้ส่งออเดอร์): "+origin;
+      return;
+     }
+   if(!AllowedToOpen()) return;
    ENUM_ORDER_TYPE orderType=(direction==1?ORDER_TYPE_BUY:ORDER_TYPE_SELL);
    double volume=GetTradeVolume(orderType,entry,stop);
-   if(volume<=0.0) { g_status="Lot below broker minimum or invalid risk"; return; }
-
+   if(volume<=0.0)
+     {
+      g_status="Lot ต่ำกว่าขั้นต่ำ หรือเกินความเสี่ยง";
+      return;
+     }
    double margin=0.0;
    if(!OrderCalcMargin(orderType,_Symbol,volume,entry,margin) ||
       margin>AccountInfoDouble(ACCOUNT_MARGIN_FREE)*0.80)
-     { g_status="Not enough available margin"; return; }
-
+     {
+      g_status="Margin ไม่เพียงพอ";
+      return;
+     }
    bool requested=(direction==1?
                    trade.Buy(volume,_Symbol,0.0,stop,target,origin):
                    trade.Sell(volume,_Symbol,0.0,stop,target,origin));
-   uint retcode=trade.ResultRetcode();
-   if(!requested || (retcode!=TRADE_RETCODE_DONE &&
-                     retcode!=TRADE_RETCODE_DONE_PARTIAL &&
-                     retcode!=TRADE_RETCODE_PLACED))
+   uint rc=trade.ResultRetcode();
+   if(!requested ||
+      (rc!=TRADE_RETCODE_DONE && rc!=TRADE_RETCODE_DONE_PARTIAL &&
+       rc!=TRADE_RETCODE_PLACED))
      {
-      PrintFormat("GTProStyle order REJECTED retcode=%u %s",
-                  retcode,trade.ResultRetcodeDescription());
-      g_status="Order rejected";
+      PrintFormat("GTProThai order rejected %u: %s",
+                  rc,trade.ResultRetcodeDescription());
+      g_status="เปิดออเดอร์ไม่สำเร็จ";
       return;
      }
    g_cooldown=InpCooldownBars;
-   PrintFormat("GTProStyle %s %.3f lots SL %.3f TP %.3f",
-               origin,volume,stop,target);
-   g_status="TRADED: "+origin;
+   g_status="เปิดออเดอร์แล้ว: "+origin;
   }
 
 void ManageOurPositions()
