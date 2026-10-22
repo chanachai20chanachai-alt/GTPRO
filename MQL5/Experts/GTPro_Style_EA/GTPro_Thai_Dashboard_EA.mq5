@@ -113,6 +113,27 @@ struct SweepState
    int      age;
   };
 
+struct ZoneState
+  {
+   bool active;
+   double low;
+   double high;
+   datetime born;
+   int age;
+  };
+ZoneState g_demand;
+ZoneState g_supply;
+
+double g_lastADX=0.0;
+int g_lastTrend=0;
+double g_lastEntry=0.0;
+double g_lastSL=0.0;
+double g_lastTP=0.0;
+int g_lastDirection=0;
+datetime g_lastSignalTime=0;
+string g_lastSignalOrigin="-";
+string g_panelPrefix="GTPV2_";
+
 FVGState   g_fvg;
 SweepState g_sweep;
 int        g_fastHandle=INVALID_HANDLE;
@@ -127,6 +148,170 @@ double     g_peakEquity=0.0;
 bool       g_dailyBlocked=false;
 bool       g_equityBlocked=false;
 string     g_status="Initializing";
+
+
+string ThaiTrend(const int trend)
+  {
+   if(trend==1) return "ขาขึ้น";
+   if(trend==-1) return "ขาลง";
+   return "ไซด์เวย์/รอเทรนด์";
+  }
+string ThaiMode()
+  {
+   return (InpExecutionMode==GT_SIGNAL_ONLY ?
+           "แจ้งสัญญาณอย่างเดียว" : "เปิดออเดอร์อัตโนมัติ");
+  }
+string PriceText(const double value)
+  {
+   return (value>0.0 ? DoubleToString(value,_Digits) : "-");
+  }
+string ZoneDescription(const ZoneState &z)
+  {
+   if(!z.active) return "ยังไม่มีโซน";
+   return PriceText(z.low)+" - "+PriceText(z.high);
+  }
+void PanelLabel(const string key,const int x,const int y,
+                const string message,const color ink,const int fs=10)
+  {
+   string name=g_panelPrefix+key;
+   if(ObjectFind(0,name)<0)
+     {
+      if(!ObjectCreate(0,name,OBJ_LABEL,0,0,0)) return;
+      ObjectSetInteger(0,name,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+      ObjectSetInteger(0,name,OBJPROP_ANCHOR,ANCHOR_LEFT_UPPER);
+      ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+      ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
+      ObjectSetString(0,name,OBJPROP_FONT,"Tahoma");
+     }
+   ObjectSetInteger(0,name,OBJPROP_XDISTANCE,x);
+   ObjectSetInteger(0,name,OBJPROP_YDISTANCE,y);
+   ObjectSetInteger(0,name,OBJPROP_COLOR,ink);
+   ObjectSetInteger(0,name,OBJPROP_FONTSIZE,fs);
+   ObjectSetString(0,name,OBJPROP_TEXT,message);
+  }
+void DrawHorizontal(const string key,const double price,
+                    const color ink,const ENUM_LINE_STYLE style)
+  {
+   string name=g_panelPrefix+key;
+   if(price<=0.0 || !InpDrawTradeLevels)
+     {
+      ObjectDelete(0,name);
+      return;
+     }
+   if(ObjectFind(0,name)<0)
+      ObjectCreate(0,name,OBJ_HLINE,0,0,price);
+   else
+      ObjectMove(0,name,0,0,price);
+   ObjectSetInteger(0,name,OBJPROP_COLOR,ink);
+   ObjectSetInteger(0,name,OBJPROP_STYLE,style);
+   ObjectSetInteger(0,name,OBJPROP_WIDTH,1);
+   ObjectSetInteger(0,name,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,name,OBJPROP_HIDDEN,true);
+  }
+void DrawZone(const string key,const ZoneState &z,const color ink,
+              const string title)
+  {
+   string rect=g_panelPrefix+key+"_ZONE";
+   string label=g_panelPrefix+key+"_TEXT";
+   if(!InpShowZones || !z.active)
+     {
+      ObjectDelete(0,rect);
+      ObjectDelete(0,label);
+      return;
+     }
+   datetime last=TimeCurrent()+
+                 (datetime)(PeriodSeconds(InpEntryTF)*InpZoneExtendBars);
+   if(ObjectFind(0,rect)<0)
+      ObjectCreate(0,rect,OBJ_RECTANGLE,0,z.born,z.high,last,z.low);
+   ObjectMove(0,rect,0,z.born,z.high);
+   ObjectMove(0,rect,1,last,z.low);
+   ObjectSetInteger(0,rect,OBJPROP_COLOR,ink);
+   ObjectSetInteger(0,rect,OBJPROP_FILL,true);
+   ObjectSetInteger(0,rect,OBJPROP_BACK,true);
+   ObjectSetInteger(0,rect,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,rect,OBJPROP_HIDDEN,true);
+   datetime txtTime=TimeCurrent()+(datetime)(PeriodSeconds(InpEntryTF)*2);
+   if(ObjectFind(0,label)<0)
+      ObjectCreate(0,label,OBJ_TEXT,0,txtTime,z.high);
+   ObjectMove(0,label,0,txtTime,z.high);
+   ObjectSetString(0,label,OBJPROP_TEXT,title+" "+ZoneDescription(z));
+   ObjectSetString(0,label,OBJPROP_FONT,"Tahoma");
+   ObjectSetInteger(0,label,OBJPROP_FONTSIZE,9);
+   ObjectSetInteger(0,label,OBJPROP_COLOR,ink);
+   ObjectSetInteger(0,label,OBJPROP_SELECTABLE,false);
+   ObjectSetInteger(0,label,OBJPROP_HIDDEN,true);
+  }
+void RenderDashboard()
+  {
+   string bg=g_panelPrefix+"PANEL";
+   if(!InpShowDashboard)
+     {
+      ObjectDelete(0,bg);
+      for(int i=0;i<13;i++)
+         ObjectDelete(0,g_panelPrefix+"P_"+IntegerToString(i));
+      return;
+     }
+   if(ObjectFind(0,bg)<0)
+     {
+      if(!ObjectCreate(0,bg,OBJ_RECTANGLE_LABEL,0,0,0)) return;
+      ObjectSetInteger(0,bg,OBJPROP_CORNER,CORNER_LEFT_UPPER);
+      ObjectSetInteger(0,bg,OBJPROP_XDISTANCE,10);
+      ObjectSetInteger(0,bg,OBJPROP_YDISTANCE,30);
+      ObjectSetInteger(0,bg,OBJPROP_XSIZE,490);
+      ObjectSetInteger(0,bg,OBJPROP_YSIZE,274);
+      ObjectSetInteger(0,bg,OBJPROP_BGCOLOR,C'24,31,43');
+      ObjectSetInteger(0,bg,OBJPROP_BORDER_TYPE,BORDER_FLAT);
+      ObjectSetInteger(0,bg,OBJPROP_COLOR,clrGray);
+      ObjectSetInteger(0,bg,OBJPROP_SELECTABLE,false);
+      ObjectSetInteger(0,bg,OBJPROP_HIDDEN,true);
+      ObjectSetInteger(0,bg,OBJPROP_BACK,false);
+     }
+   string strategy="ผสม";
+   if(InpStrategy==MODE_TREND) strategy="BOS/FVG";
+   if(InpStrategy==MODE_REVERSAL) strategy="Sweep/CHoCH";
+   string direction=(g_lastDirection==1 ? "BUY" :
+                     (g_lastDirection==-1 ? "SELL" : "-"));
+   string slmode=(InpSLMode==GT_SL_FIXED_POINTS ?
+                  IntegerToString(InpFixedSLPoints)+" จุด" : "Swing/ATR");
+   string tpmode=(InpTPMode==GT_TP_FIXED_POINTS ?
+                  IntegerToString(InpFixedTPPoints)+" จุด" :
+                  "RR 1:"+DoubleToString(InpRiskReward,2));
+   string trailmode=(InpTrailMode==GT_TRAIL_OFF ? "ปิด" :
+                     (InpTrailMode==GT_TRAIL_POINTS ? "จุด" : "ATR"));
+   string lock=(g_dailyBlocked||g_equityBlocked ? "ล็อกเปิดไม้ใหม่" : "ปกติ");
+   string lines[13];
+   lines[0]="GTPro Style EA V2 | ภาษาไทย";
+   lines[1]="โหมด: "+ThaiMode()+" | กลยุทธ์: "+strategy;
+   lines[2]="เทรนด์: "+ThaiTrend(g_lastTrend)+" | ADX: "+DoubleToString(g_lastADX,1);
+   lines[3]="Demand (แนวรับ): "+ZoneDescription(g_demand);
+   lines[4]="Supply (แนวต้าน): "+ZoneDescription(g_supply);
+   lines[5]="สัญญาณล่าสุด: "+direction+" / "+g_lastSignalOrigin;
+   lines[6]="จุดเข้า: "+PriceText(g_lastEntry)+" | SL: "+PriceText(g_lastSL);
+   lines[7]="TP: "+PriceText(g_lastTP)+" | เวลา: "+(g_lastSignalTime>0 ?
+            TimeToString(g_lastSignalTime,TIME_DATE|TIME_MINUTES) : "-");
+   lines[8]="SL: "+slmode+" | TP: "+tpmode;
+   lines[9]="กันหน้าทุน: "+(InpUseBreakeven?"เปิด":"ปิด")+
+            " | Trailing: "+trailmode;
+   lines[10]="ป้องกันพอร์ต: "+lock+" | Spread: "+
+             IntegerToString((int)SymbolInfoInteger(_Symbol,SYMBOL_SPREAD))+" จุด";
+   lines[11]="สถานะ: "+g_status;
+   lines[12]="จุด = _Point ของโบรกเกอร์ | ทดลอง Demo ก่อนใช้จริง";
+   for(int k=0;k<13;k++)
+     {
+      color ink=clrWhiteSmoke;
+      if(k==0) ink=clrGold;
+      if(k==3) ink=clrAqua;
+      if(k==4) ink=clrSalmon;
+      if(k==5) ink=(g_lastDirection==1?clrLime:
+                    (g_lastDirection==-1?clrTomato:clrWhiteSmoke));
+      if(k==10 && (g_dailyBlocked||g_equityBlocked)) ink=clrOrangeRed;
+      PanelLabel("P_"+IntegerToString(k),20,39+k*20,lines[k],ink,(k==0?12:10));
+     }
+  }
+bool ZoneTouchesBar(const ZoneState &z,const MqlRates &bar)
+  {
+   return (z.active && bar.low<=z.high && bar.high>=z.low);
+  }
 
 bool IndicatorValue(const int handle,const int shift,double &value)
   {
