@@ -361,8 +361,8 @@ bool AnyPositionOnSymbol()
 
 bool AllowedToOpen()
   {
-   if(!InpEnableAutoTrading) { g_status="SIGNAL ONLY (auto trading disabled)"; return false; }
-   if(g_dailyBlocked || g_equityBlocked) { g_status="EQUITY LOCK"; return false; }
+   if(InpExecutionMode==GT_SIGNAL_ONLY) { g_status="โหมดแจ้งสัญญาณเท่านั้น"; return false; }
+   if(g_dailyBlocked || g_equityBlocked) { g_status="ล็อกพอร์ต - ไม่เปิดไม้ใหม่"; return false; }
    if(g_cooldown>0) { g_status="Cooldown"; return false; }
    if(AnyPositionOnSymbol()) { g_status="Existing position on symbol"; return false; }
    if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) ||
@@ -402,6 +402,59 @@ bool FindPivots(const MqlRates &r[],const int n,const int first,
       if(foundHigh && foundLow) return true;
      }
    return false;
+  }
+
+
+// Demand: last bearish base candle before upward displacement and bullish BOS.
+// Supply: last bullish base candle before downward displacement and bearish BOS.
+// This is an independently designed approximation, not verified GTpro logic.
+void RefreshZones(const MqlRates &r[],const int n,const double atr)
+  {
+   if(g_demand.active)
+     {
+      g_demand.age++;
+      if(g_demand.age>InpZoneMaxAgeBars || r[1].close<g_demand.low)
+         g_demand.active=false;
+     }
+   if(g_supply.active)
+     {
+      g_supply.age++;
+      if(g_supply.age>InpZoneMaxAgeBars || r[1].close>g_supply.high)
+         g_supply.active=false;
+     }
+   double sh=0.0,sl=0.0;
+   if(FindPivots(r,n,InpPivotRight+1,sh,sl) &&
+      MathAbs(r[1].close-r[1].open)>=atr*InpZoneDisplacementATR)
+     {
+      bool bull=(r[1].close>sh+InpBreakBufferPoints*_Point &&
+                 r[2].close<=sh+InpBreakBufferPoints*_Point);
+      bool bear=(r[1].close<sl-InpBreakBufferPoints*_Point &&
+                 r[2].close>=sl-InpBreakBufferPoints*_Point);
+      int look=MathMin(InpZoneBaseLookback+1,n-2);
+      for(int j=2;j<=look;j++)
+        {
+         if(bull && r[j].close<r[j].open)
+           {
+            g_demand.active=true;
+            g_demand.low=r[j].low;
+            g_demand.high=r[j].open;
+            g_demand.born=r[j].time;
+            g_demand.age=0;
+            break;
+           }
+         if(bear && r[j].close>r[j].open)
+           {
+            g_supply.active=true;
+            g_supply.low=r[j].open;
+            g_supply.high=r[j].high;
+            g_supply.born=r[j].time;
+            g_supply.age=0;
+            break;
+           }
+        }
+     }
+   DrawZone("DEMAND",g_demand,clrDeepSkyBlue,"DEMAND");
+   DrawZone("SUPPLY",g_supply,clrTomato,"SUPPLY");
   }
 
 bool FindFVG(const MqlRates &r[],const int n,const int direction,
@@ -551,6 +604,11 @@ int ProcessReversal(const MqlRates &r[],const int n,const int trend,
    else if(r[1].high>high+buffer && r[1].close<high)
       direction=-1;          // Buy-side liquidity sweep
    if(direction==0) return 0;
+   if(InpRequireZoneForReversal)
+     {
+      if(direction==1 && !ZoneTouchesBar(g_demand,r[1])) return 0;
+      if(direction==-1 && !ZoneTouchesBar(g_supply,r[1])) return 0;
+     }
 
    double trigger=(direction==1 ? -DBL_MAX : DBL_MAX);
    for(int j=2;j<2+InpInternalBreakBars;j++)
@@ -601,7 +659,7 @@ double GetTradeVolume(const ENUM_ORDER_TYPE orderType,
 void DrawTradeArrow(const int direction,const datetime stamp,
                     const double price)
   {
-   string name="GTP_"+IntegerToString((long)stamp)+"_"+
+   string name=g_panelPrefix+"ARROW_"+IntegerToString((long)stamp)+"_"+
                IntegerToString(direction);
    if(ObjectFind(0,name)>=0) return;
    if(ObjectCreate(0,name,(direction==1?OBJ_ARROW_UP:OBJ_ARROW_DOWN),
