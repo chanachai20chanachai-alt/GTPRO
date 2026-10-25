@@ -57,15 +57,6 @@ string g_prefix="";
 string g_status="WAIT_AI";
 
 string K(const string suffix) { return g_prefix+suffix; }
-void StoreState()
-{
-   GlobalVariableSet(K("plan_hash"),(double)StringGetCharacter(g_plan.id,0)); // replaced below by hash
-   GlobalVariableSet(K("entries"),(double)g_planEntries);
-   GlobalVariableSet(K("allow"),g_allowEntry?1.0:0.0);
-   GlobalVariableSet(K("rearmed"),g_rearmed?1.0:0.0);
-   GlobalVariableSet(K("last_entry"),(double)g_lastEntryBar);
-   GlobalVariableSet(K("last_exit"),(double)g_lastExit);
-}
 double PlanHash(const string s)
 {
    // Deterministic 31-bit rolling hash to persist plan state on terminal restart.
@@ -319,6 +310,12 @@ bool RiskPermits(const double price,const double sl,const double tp,const ENUM_O
 {
    MqlTick tick;
    if(!SymbolInfoTick(_Symbol,tick)) {g_status="NO_TRADE: QUOTE ERROR";return false;}
+   double vmin=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN);
+   double vmax=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MAX);
+   double vstep=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_STEP);
+   if(InpFixedLot<vmin || InpFixedLot>vmax || vstep<=0 ||
+      MathAbs((InpFixedLot/vstep)-MathRound(InpFixedLot/vstep))>0.00001)
+   {g_status="NO_TRADE: INVALID FIXED LOT";return false;}
    if(tick.ask-tick.bid>InpMaxSpreadGold) {g_status="NO_TRADE: SPREAD";return false;}
    if(DailyEntries()>=InpMaxTradesPerDay) {g_status="NO_TRADE: DAILY TRADE LIMIT";return false;}
    double net=DailyNetMoney();
@@ -368,7 +365,6 @@ bool RiskPermits(const double price,const double sl,const double tp,const ENUM_O
 void TryEntry()
 {
    if(!g_plan.valid || TimeGMT()>=g_plan.expiry) {g_status="NO_TRADE: PLAN EXPIRED";return;}
-   if(!InpEnableAutoTrade) {g_status="SIGNAL ONLY (AUTO OFF)";return;}
    if(!g_allowEntry || g_planEntries>InpMaxReentriesAfterTP)
    {g_status="NO_TRADE: PLAN ENTRY LIMIT";return;}
    if(g_lastExit>0 && TimeCurrent()-g_lastExit<InpCooldownMinutes*60)
@@ -390,6 +386,7 @@ void TryEntry()
    if(g_plan.strategy=="BREAKOUT_RETEST" && !BreakoutWasConfirmed())
    {g_status="WAIT: M15 BREAKOUT NOT CONFIRMED";return;}
    if(!M5Signal()) {g_status="WAIT: M5 CONFIRMATION";return;}
+   if(!InpEnableAutoTrade) {g_status="SIGNAL ONLY: "+g_plan.decision+" M5 CONFIRMED";return;}
    double price=(g_plan.decision=="BUY")?tick.ask:tick.bid;
    if(MathAbs(price-g_plan.reference)>InpMaxEntryDriftGold)
    {g_status="NO_TRADE: ENTRY DRIFT";return;}
@@ -491,7 +488,7 @@ int OnInit()
    }
    g_plan.valid=false;
    g_prefix="GAI."+IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN))+"."+
-             IntegerToString(InpMagic)+"."; // Dedicated account / magic recommended
+             IntegerToString(InpMagic)+"."+_Symbol+"."; // Scoped to symbol
    if(InpResetRiskLock) GlobalVariableSet(K("locked"),0);
    g_riskLock=GlobalVariableCheck(K("locked")) && GlobalVariableGet(K("locked"))>0.5;
    double equity=AccountInfoDouble(ACCOUNT_EQUITY);
