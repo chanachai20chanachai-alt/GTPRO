@@ -45,8 +45,8 @@
    - `BRIDGE_TOKEN` = สุ่มค่ายาวอย่างน้อย 12 ตัวอักษร แล้วตั้งค่าเดียวกันใน Input ของ EA
    - `OPENAI_MODEL` = โมเดลที่รองรับ Structured Outputs ในบัญชีของคุณ (ค่าเริ่มต้นใน bridge: `gpt-5-mini`)
    - `REQUIRE_NEWS=1` (ค่าเริ่มต้น) — ต้องมีปฏิทิน MT5 ที่ตรวจสอบได้
-3. รัน `python GoldAI/bridge/server.py` ให้ Bridge ฟังเฉพาะ `127.0.0.1:8765`
-4. ใน MT5: Tools > Options > Expert Advisors > Allow WebRequest for listed URL แล้วเพิ่ม `http://127.0.0.1:8765`
+3. รัน `python GoldAI/bridge/server.py` ให้ Bridge ฟังเฉพาะ `127.0.0.1`
+4. ใน MT5: Tools > Options > Expert Advisors > Allow WebRequest for listed URL แล้วเพิ่ม `http://127.0.0.1`
 5. เปิด MetaEditor และคัดลอก `GoldAI/MT5/GoldAI_AutoTrader.mq5` ไป `MQL5/Experts/GoldAI_AutoTrader.mq5`
 6. Compile ใน MetaEditor และตรวจแท็บ Errors ให้ **0 errors**; หากมี warning ให้ตรวจและแก้
 7. ติดตั้งลงกราฟ XAUUSD.v **บัญชี Demo** แล้วกำหนด `InpBridgeToken` ให้ตรงกับ Python; เริ่มที่ `InpEnableAutoTrade=false`
@@ -87,3 +87,7 @@ AI ไม่รับประกันความถูกต้องขอ�
 3. เพิ่มสัญญาณที่ตรวจสอบ setup M15 และการออกจากโซนจริงก่อน re-entry
 4. สร้าง UI Dashboard ภาษาไทย + Logs
 5. Backtest รายเดือนและ Demo forward test 4–8 สัปดาห์ แสดง net points, trades/day, DD และ win/loss distribution ก่อนเงินจริง
+
+### WebRequest Port บน MT5
+
+MQL5 WebRequest ระบุว่า HTTP ใช้พอร์ต 80 และ HTTPS ใช้พอร์ต 443 ตาม protocol. รุ่นนี้จึงเลือก Python Bridge ที่ **127.0.0.1:80** และ URL `http://127.0.0.1`. หากพอร์ต 80 ของ Windows ถูกใช้อยู่ ให้ใช้ reverse proxy ในเครื่องหรือปรับ architecture ก่อนใช้งาน ไม่ควรแก้ WebRequest ให้ใช้พอร์ตอื่นโดยไม่ทดสอบการเชื่อมต่อจริง.
