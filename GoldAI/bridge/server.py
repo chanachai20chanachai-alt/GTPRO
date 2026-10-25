@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from openai import OpenAI
 
 HOST = "127.0.0.1"
-PORT = int(os.environ.get("BRIDGE_PORT", "8765"))
+PORT = int(os.environ.get("BRIDGE_PORT", "80"))
 MODEL = os.environ.get("OPENAI_MODEL", "gpt-5-mini")
 TOKEN = os.environ.get("BRIDGE_TOKEN", "")
 REQUIRE_NEWS = os.environ.get("REQUIRE_NEWS", "1") == "1"
