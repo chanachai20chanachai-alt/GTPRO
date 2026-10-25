@@ -7,7 +7,7 @@
 #property version "1.10"
 #include <Trade/Trade.mqh>
 
-input string InpBridgeURL             = "http://127.0.0.1:8765/analyze";
+input string InpBridgeURL             = "http://127.0.0.1/analyze";
 input string InpBridgeToken           = "";       // Same as BRIDGE_TOKEN in Python; do not commit .set files
 input bool   InpEnableAutoTrade       = false;    // DEMO FIRST; OFF by default
 input bool   InpRequireVerifiedNews   = true;     // Fail closed when MT5 calendar unavailable
