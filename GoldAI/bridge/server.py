@@ -62,6 +62,9 @@ def validate_market(market: dict) -> None:
     sym = market.get("symbol")
     if not isinstance(sym, str) or not sym.upper().startswith("XAUUSD"):
         raise ValueError("only XAUUSD supported")
+    ts = market.get("timestamp_utc")
+    if not isinstance(ts, (int, float)) or abs(time.time() - ts) > 600:
+        raise ValueError("market request timestamp missing or stale")
     for tf, count in (("h1", 40), ("m15", 60), ("m5", 80)):
         candles = market.get(tf)
         if not isinstance(candles, list) or len(candles) < count:
