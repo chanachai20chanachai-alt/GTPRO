@@ -1,4 +1,5 @@
 import unittest
+import time
 from unittest.mock import patch
 import sys
 
@@ -19,7 +20,7 @@ def make_market():
                 for i in range(n)]
     return {"symbol": "XAUUSD.v",
             "h1": candles(80), "m15": candles(100), "m5": candles(100),
-            "news_verified": True}
+            "news_verified": True, "timestamp_utc": int(time.time())}
 
 
 def plan():
@@ -31,6 +32,12 @@ def plan():
 class BridgeChecks(unittest.TestCase):
     def test_market_valid(self):
         server.validate_market(make_market())
+
+    def test_stale_snapshot_rejected(self):
+        d = make_market()
+        d["timestamp_utc"] -= 3600
+        with self.assertRaises(ValueError):
+            server.validate_market(d)
 
     def test_missing_candles_rejected(self):
         d = make_market()
